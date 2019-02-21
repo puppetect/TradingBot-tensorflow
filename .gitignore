@@ -1,4 +1,6 @@
 __pycache__/
+saves/
 *.py[cod]
 *$py.class
 .DS_Store
+run.ipynb

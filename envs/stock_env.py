@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 import matplotlib
-matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
 import gym
@@ -15,12 +14,12 @@ class Data:
         self.prices = self.raw.loc[self.factors.index]
 
     def factorize(self):
-        o = self.raw.open
-        c = self.raw.close
-        h = self.raw.high
-        l = self.raw.low
-        rtn = self.daily_return(c)
-        atr = self.average_true_range(h, l, c)
+        op = self.raw.open
+        cp = self.raw.close
+        hp = self.raw.high
+        lp = self.raw.low
+        rtn = self.daily_return(cp)
+        atr = self.average_true_range(hp, lp, cp)
         df = pd.DataFrame({'rtn': rtn, 'atr': atr})
         df = (df - df.mean()) / df.std()
         df.clip(-10., 10., inplace=True)
@@ -57,14 +56,13 @@ class Data:
 
 
 class Simulator:
-    def __init__(self, data, train_test_split=0.8, trade_period=1000, train=True, lots=10000, commission=2.5):
+    def __init__(self, data, train_test_split=0.8, trade_period=1000, lots=10000, commission=5):
         self.states = data.factors
         self.prices = data.prices
         self.train_end_index = int(train_test_split * len(self.states))
         self.trade_period = trade_period
-        self.min_values = self.prices.min(axis=0)
-        self.max_values = self.prices.max(axis=0)
-        self.train = train
+        self.min_values = self.states.min(axis=0)
+        self.max_values = self.states.max(axis=0)
         self.lots = lots
         self.commission = commission
         self.init_portfolio = {
@@ -77,22 +75,22 @@ class Simulator:
             'Type': None
         }
 
-    def reset(self):
-        self.episode_reward = 0
+    def reset(self, train):
+        self.curr_trade_reward = 0
         self.total_reward = 0
         self.total_trade = 0
         self.average_profit_per_trade = 0
         self.have_position = False
         self.journal = []
         self.portfolio = self.init_portfolio
-        if self.train:
+        if train:
             self.offset = 0
             self.end = self.train_end_index - 1
         else:
             self.offset = self.train_end_index
             self.end = len(self.states) - 1
         obs = self.states.iloc[self.offset]
-        return obs
+        return obs.values
 
     def step(self, action):
         prev_close_price = self.prices.close[self.offset]
@@ -115,13 +113,14 @@ class Simulator:
 
         # sell
         if action == 1 or self.portfolio['Trade Duration'] >= self.trade_period:
-            self.portfolio['Exit Price'] = curr_close_price
-            self.portfolio['Exit Time'] = curr_timestamp
-            self.portfolio['Profit'] = curr_close_price - self.portfolio['Entry Price'] - self.commission
-            self.journal.append(self.portfolio)
-            self.portfolio = self.init_portfolio
-            self.episode_reward = 0
-            self.have_position = False
+            if self.have_position:
+                self.portfolio['Exit Price'] = curr_close_price
+                self.portfolio['Exit Time'] = curr_timestamp
+                self.portfolio['Profit'] = (curr_close_price - self.portfolio['Entry Price']) * self.lots - self.commission
+                self.journal.append(self.portfolio)
+                self.portfolio = self.init_portfolio
+                self.curr_trade_reward = 0
+                self.have_position = False
 
         # skip
         if action == 2:
@@ -129,35 +128,35 @@ class Simulator:
                 self.portfolio['Trade Duration'] += 1
                 reward = (curr_close_price - prev_close_price) * self.lots
 
-        self.episode_reward += reward
+        self.curr_trade_reward += reward
         self.total_reward += reward
 
         if self.total_trade > 0:
             self.average_profit_per_trade = self.total_reward / self.total_trade
 
         info = {'Aberage reward per trade': self.average_profit_per_trade,
-                'Reward for this trade episode': self.episode_reward,
+                'Reward for this trade': self.curr_trade_reward,
                 'Total reward': self.total_reward}
 
-        next_obs = self.states.iloc[self.offset]
+        next_obs = self.states.iloc[self.offset].values
         next_obs[-2] = self.have_position
         next_obs[-1] = self.portfolio['Trade Duration']
 
         done = self.offset >= self.end
 
-        return next_obs, self.episode_reward, done, info
+        return next_obs, self.curr_trade_reward, done, info
 
 
 class StockEnv(gym.Env):
     metadata = {'render.modes': ['human']}
 
-    def __init__(self):
-        self.sim = Simulator(Data('data/000001_0518.csv'), train_test_split=0.8, trade_period=1000, train=True, lots=10000, commission=2.5)
+    def __init__(self, csv_file, train_test_split, trade_period, lots, commission):
+        self.sim = Simulator(Data(csv_file), train_test_split, trade_period, lots, commission)
         self.action_space = spaces.Discrete(3)
         self.observation_space = spaces.Box(self.sim.min_values, self.sim.max_values, dtype=np.float32)
 
-    def reset(self):
-        obs = self.sim.reset()
+    def reset(self, train=True):
+        obs = self.sim.reset(train)
         return obs
 
     def step(self, action):
@@ -169,3 +168,8 @@ class StockEnv(gym.Env):
 
     def render(self):
         pass
+
+
+if __name__ == '__main__':
+    env = StockEnv('../data/000001_0518.csv', 0.8, 1000, True, 10000, 2.5)
+    print(env.observation_space)
