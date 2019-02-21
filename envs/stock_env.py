@@ -82,7 +82,7 @@ class Simulator:
         self.average_profit_per_trade = 0
         self.have_position = False
         self.journal = []
-        self.portfolio = self.init_portfolio
+        self.portfolio = self.init_portfolio.copy()
         if train:
             self.offset = 0
             self.end = self.train_end_index - 1
@@ -118,7 +118,7 @@ class Simulator:
                 self.portfolio['Exit Time'] = curr_timestamp
                 self.portfolio['Profit'] = (curr_close_price - self.portfolio['Entry Price']) * self.lots - self.commission
                 self.journal.append(self.portfolio)
-                self.portfolio = self.init_portfolio
+                self.portfolio = self.init_portfolio.copy()
                 self.curr_trade_reward = 0
                 self.have_position = False
 

@@ -4,10 +4,9 @@ import envs
 import numpy as np
 import tensorflow as tf
 from stable_baselines import deepq
-from stable_baselines.common import tf_util, OffPolicyRLModel, TensorboardWriter
+from stable_baselines.common import tf_util, TensorboardWriter
 from stable_baselines.deepq.policies import FeedForwardPolicy
 from stable_baselines.common.schedules import LinearSchedule
-from stable_baselines.deepq.policies import MlpPolicy
 from stable_baselines.deepq.replay_buffer import ReplayBuffer
 from stable_baselines.a2c.utils import find_trainable_variables
 from stable_baselines import DQN
