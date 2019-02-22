@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
-import matplotlib
 import matplotlib.pyplot as plt
-
+import matplotlib.dates as mdates
+from mpl_finance import candlestick_ohlc
 import gym
 from gym import spaces
 
@@ -26,7 +26,7 @@ class Data:
                 shifted = df.iloc[:, :1].shift(i + 1)
                 df = df.join(shifted, rsuffix='_{}'.format(i + 1))
         df.dropna(inplace=True)
-        df = (df - df.mean()) / df.std()
+        # df = (df - df.mean()) / df.std()
         df.clip(-10., 10., inplace=True)
         return df
 
@@ -166,8 +166,33 @@ class StockEnv(gym.Env):
     def seed(self):
         pass
 
-    def render(self):
-        pass
+    def render(self, journal, train=True):
+        # https://github.com/matplotlib/mpl_finance/blob/master/examples/finance_demo.py
+
+        longs = [j for j in journal if j['Type'] == 'LONG']
+        shorts = [j for j in journal if j['Type'] == 'SHORT']
+
+        quotes = self.sim.prices
+        if train:
+            start = 0
+            end = self.sim.train_end_index - 1
+        else:
+            start = self.train_end_index
+            end = len(quotes) - 1
+        quotes = quotes[(quotes.index >= start) & (quotes.index <= end)]
+
+        fig, ax = plt.subplots(figsize=(40, 10))
+        fig.subplots_adjust(bottom=0.2)
+        ax.xaxis.set_major_locator(mdates.MonthLocator())
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%Y'))
+
+        candlestick_ohlc(ax, zip(mdates.date2num(quotes.index.to_pydatetime()), quotes.open, quotes.high, quotes.low, quotes.close), width=0.02, colorup='red', colordown='green')
+        ax.plot(longs['Entry Time'], longs['Entry Price'] - 1, 'r^', alpha=1.0)
+        ax.plot(shorts['Entry Time'], shorts['Entry Price'] - 1, 'gv', alpha=1.0)
+        ax.xaxis_date()
+        ax.autoscale_view()
+        plt.setp(plt.gca().get_xticklabels(), rotation=45, horizontalalignment='right')
+        plt.show()
 
 
 if __name__ == '__main__':
