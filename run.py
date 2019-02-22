@@ -19,32 +19,9 @@ class FFPolicy(FeedForwardPolicy):
 
 class TradingDQN(DQN):
 
-    def __init__(self, policy, env, gamma=0.99, batch_size=32, buffer_size=50000, learning_starts=10000, learning_rate=5e-4, target_network_update_freq=1000, exploration_final_eps=0.1, exploration_fraction=0.2, tensorboard_log=None, _init_setup_model=True):
+    def __init__(self, policy, env, gamma=0.99, batch_size=32, buffer_size=50000, learning_starts=10000, learning_rate=5e-4, target_network_update_freq=1000, exploration_final_eps=0.1, exploration_fraction=0.4, tensorboard_log=None, _init_setup_model=True):
 
         super().__init__(policy=policy, env=env, gamma=gamma, batch_size=batch_size, buffer_size=buffer_size, learning_starts=learning_starts, learning_rate=learning_rate, target_network_update_freq=target_network_update_freq, exploration_final_eps=exploration_final_eps, exploration_fraction=exploration_fraction, tensorboard_log=tensorboard_log, _init_setup_model=_init_setup_model)
-
-        # self.policy = policy
-        # self.env = env
-        # self.batch_size = batch_size
-        # self.buffer_size = buffer_size
-        # self.learning_starts = learning_starts
-        # self.learning_rate = learning_rate
-        # self.target_network_update_freq = target_network_update_freq
-        # self.exploration_final_eps = exploration_final_eps
-        # self.exploration_fraction = exploration_fraction
-        # self.tensorboard_log = tensorboard_log
-        # self.full_tensorboard_log = full_tensorboard_log
-        # self.graph = None
-        # self.sess = None
-        # self.act = None
-        # self.train = None
-        # self.update_target = None
-        # self.step_model = None
-        # self.replay_buffer = None
-        # self.exploration = None
-        # self.episode_reward = None
-        # if _init_setup_model:
-        #     self.setup_model()
 
     def setup_model(self):
         self.graph = tf.Graph()
@@ -67,7 +44,7 @@ class TradingDQN(DQN):
             self.update_target(sess=self.sess)
             self.summary = tf.summary.merge_all()
 
-    def learn(self, total_timesteps, seed=None, tb_log_name='DQN', reset_num_timesteps=True):
+    def learn(self, total_timesteps, seed=None, tb_log_name='DQN', test_interval=1, reset_num_timesteps=True):
         if reset_num_timesteps:
             self.num_timesteps = 0
 
@@ -118,11 +95,11 @@ class TradingDQN(DQN):
 
                     print("mean 100 episode reward   | {:.1f}".format(mean_100ep_reward))
                     print("Total operations          | {}".format(len(self.env.sim.journal)))
-                    print("Avg duration trades       | {:.2f}".format(np.mean([j["Trade Duration"] for j in self.env.sim.journal])))
+                    # print("Avg duration trades       | {:.2f}".format(np.mean([j["Trade Duration"] for j in self.env.sim.journal])))
                     print("Total profit              | {:.2f}".format(sum([j['Profit'] for j in self.env.sim.journal])))
                     print("Avg profit per trade      | {:.3f}".format(self.env.sim.average_profit_per_trade))
 
-                    if num_episodes % 20 == 0:
+                    if num_episodes % test_interval == 0:
                         print("--")
                         profit, ave_profit = self.test()
                         print("Total profit test         > {:.2f}".format(profit))
@@ -143,11 +120,10 @@ class TradingDQN(DQN):
         for episode in range(episodes):
             done = False
             while not done:
-                action, _, _ = self.step_model.step(np.array(obs)[None], deterministic=True)
+                action, _ = self.predict(obs)
                 obs, reward, done, info = self.env.step(action)
-
-            test_episode_rewards.append(sum([j['Profit'] for j in self.env.sim.journal]))
-            test_ave_profit_per_trade.append(self.env.sim.average_profit_per_trade)
+                test_episode_rewards.append(sum([j['Profit'] for j in self.env.sim.journal]))
+                test_ave_profit_per_trade.append(self.env.sim.average_profit_per_trade)
         return np.mean(test_episode_rewards), np.mean(test_ave_profit_per_trade)
 
     def save(self, save_path):
@@ -171,5 +147,5 @@ class TradingDQN(DQN):
 if __name__ == '__main__':
     env = gym.make('trading-v0')
     model = TradingDQN(FFPolicy, env, tensorboard_log='saves/log')
-    model.learn(total_timesteps=1000000)
+    model.learn(total_timesteps=5000000, test_interval=1)
     model.save('saves/model.pkl')

@@ -8,24 +8,26 @@ from gym import spaces
 
 
 class Data:
-    def __init__(self, csv_file):
+    def __init__(self, csv_file, lookback=9):
         self.raw = pd.read_csv(csv_file, parse_dates=True, index_col=0)
-        self.factors = self.factorize()
+        self.factors = self.factorize(lookback)
         self.prices = self.raw.loc[self.factors.index]
 
-    def factorize(self):
+    def factorize(self, lookback):
         op = self.raw.open
         cp = self.raw.close
         hp = self.raw.high
         lp = self.raw.low
         rtn = self.daily_return(cp)
-        atr = self.average_true_range(hp, lp, cp)
-        df = pd.DataFrame({'rtn': rtn, 'atr': atr})
+        # atr = self.average_true_range(hp, lp, cp)
+        df = pd.DataFrame({'rtn': rtn})
+        if lookback > 0:
+            for i in range(lookback):
+                shifted = df.iloc[:, :1].shift(i + 1)
+                df = df.join(shifted, rsuffix='_{}'.format(i + 1))
+        df.dropna(inplace=True)
         df = (df - df.mean()) / df.std()
         df.clip(-10., 10., inplace=True)
-        df.dropna(inplace=True)
-        df['have_position'] = np.zeros(len(df))
-        df['duration_trade'] = np.zeros(len(df))
         return df
 
     @staticmethod
@@ -56,7 +58,7 @@ class Data:
 
 
 class Simulator:
-    def __init__(self, data, train_test_split=0.8, trade_period=1000, lots=10000, commission=5):
+    def __init__(self, data, train_test_split=0.8, trade_period=9, lots=10000, commission=5):
         self.states = data.factors
         self.prices = data.prices
         self.train_end_index = int(train_test_split * len(self.states))
@@ -100,35 +102,35 @@ class Simulator:
         curr_timestamp = self.prices.index[self.offset]
         reward = 0
 
-        # buy
-        if action == 0:
-            if not self.have_position:
-                self.portfolio['Entry Price'] = curr_open_price
-                self.portfolio['Type'] = 'BUY'
-                self.portfolio['Entry Time'] = curr_timestamp
-                self.total_trade += 1
-                self.have_position = True
+        if self.have_position:
             self.portfolio['Trade Duration'] += 1
-            reward = (curr_close_price - curr_open_price) * self.lots - self.commission
-
-        # sell
-        if action == 1 or self.portfolio['Trade Duration'] >= self.trade_period:
-            if self.have_position:
-                self.portfolio['Exit Price'] = curr_close_price
+            if self.portfolio['Trade Duration'] >= self.trade_period:
                 self.portfolio['Exit Time'] = curr_timestamp
-                self.portfolio['Profit'] = (curr_close_price - self.portfolio['Entry Price']) * self.lots - self.commission
+                self.portfolio['Exit Price'] = curr_open_price
                 self.journal.append(self.portfolio)
                 self.portfolio = self.init_portfolio.copy()
-                self.curr_trade_reward = 0
                 self.have_position = False
+                self.curr_trade_reward = 0
+            else:
+                action = 2  # do nothing
+                multiplier = 1.0 if self.portfolio['Type'] == 'LONG' else -1.0
+                reward = (curr_close_price - prev_close_price) * self.lots * multiplier
 
-        # skip
-        if action == 2:
-            if self.have_position:
-                self.portfolio['Trade Duration'] += 1
-                reward = (curr_close_price - prev_close_price) * self.lots
+        if action == 2 and not self.have_position:  # do nothing
+            reward = 0
+
+        else:
+            self.total_trade += 1
+            self.portfolio['Type'] = 'LONG' if action == 0 else 'SHORT'
+            self.portfolio['Entry Time'] = curr_timestamp
+            self.portfolio['Entry Price'] = curr_open_price
+            multiplier = 1.0 if self.portfolio['Type'] == 'LONG' else -1.0
+            reward = (curr_close_price - curr_open_price) * self.lots * multiplier
+
+            self.have_position = True
 
         self.curr_trade_reward += reward
+        self.portfolio['Profit'] += reward
         self.total_reward += reward
 
         if self.total_trade > 0:
@@ -139,12 +141,10 @@ class Simulator:
                 'Total reward': self.total_reward}
 
         next_obs = self.states.iloc[self.offset].values
-        next_obs[-2] = self.have_position
-        next_obs[-1] = self.portfolio['Trade Duration']
 
         done = self.offset >= self.end
 
-        return next_obs, self.curr_trade_reward, done, info
+        return next_obs, reward, done, info
 
 
 class StockEnv(gym.Env):
@@ -171,5 +171,6 @@ class StockEnv(gym.Env):
 
 
 if __name__ == '__main__':
-    env = StockEnv('../data/000001_0518.csv', 0.8, 1000, True, 10000, 2.5)
-    print(env.observation_space)
+    pd.set_option('display.max_columns', 500)
+    env = StockEnv('../data/000001_0518.csv', 0.8, 1000, 10000, 2.5)
+    print(env.sim.states.max(0))
