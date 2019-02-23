@@ -232,15 +232,26 @@ class StockEnv(gym.Env):
 
         fig, ax, ax2 = plt.subplots(figsize=(40, 20))
         fig.subplots_adjust(bottom=0.2)
-        ax.xaxis.set_major_locator(mdates.MonthLocator())
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%Y'))
 
-        candlestick_ohlc(ax, zip(mdates.date2num(quotes.index.to_pydatetime()), quotes.open, quotes.high, quotes.low, quotes.close), width=0.02, colorup='red', colordown='green')
-        # ax.plot(longs['Entry Time'], longs['Entry Price'] - 1, 'r^', alpha=1.0)
-        ax.plot(mdates.date2num([short['Entry Time'] for short in shorts]), [short['Entry Price'] + 1 for short in shorts], 'gv', alpha=1.0)
-        ax.xaxis_date()
-        ax.autoscale_view()
-        plt.setp(plt.gca().get_xticklabels(), rotation=45, horizontalalignment='right')
+        ax.set_title('Action History')
+        ax.xaxis.set_major_locator(mdates.MonthLocator())
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%y'))
+        ax2.xaxis.set_major_locator(mdates.MonthLocator())
+        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m/%y'))
+
+        candlestick_ohlc(ax, zip(mdates.date2num(quotes.index.to_pydatetime()), quotes.open, quotes.high, quotes.low, quotes.close), width=0.05, colorup='red', colordown='green')
+
+        buys = journal.loc[journal.Type == 'BUY', :]
+        sells = journal.loc[journal.Type == 'SELL', :]
+
+        ax.plot(buys['Entry Time'], buys['Entry Price'] - 1, 'r^', alpha=1.0)
+        ax.plot(sells['Entry Time'], sells['Entry Price'] + 1, 'gv', alpha=1.0)
+        plt.setp(ax.get_xticklabels(), rotation=45, horizontalalignment='right')
+
+        ax2.set_title('Equity Curve')
+        ax2.plot(journal['Exit Time'], journal['Profit'])
+        plt.setp(ax2.get_xticklabels(), rotation=45, horizontalalignment='right')
+
         plt.show()
 
 
