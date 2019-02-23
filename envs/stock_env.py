@@ -67,84 +67,134 @@ class Simulator:
         self.max_values = self.states.max(axis=0)
         self.lots = lots
         self.commission = commission
-        self.init_portfolio = {
-            'Entry Price': 0,
-            'Exit Price': 0,
-            'Entry Time': None,
-            'Exit Time': None,
-            'Profit': 0,
-            'Trade Duration': 0,
-            'Type': None
-        }
 
     def reset(self, train):
-        self.curr_trade_reward = 0
         self.total_reward = 0
-        self.total_trade = 0
+        self.total_trades = 0
         self.average_profit_per_trade = 0
-        self.have_position = False
-        self.journal = []
-        self.portfolio = self.init_portfolio.copy()
+        self.count_open_trades = 0
+
         if train:
-            self.offset = 0
-            self.end = self.train_end_index - 1
+            self.current_time = 1
+            self.end = self.train_end_index
         else:
-            self.offset = self.train_end_index
+            self.current_time = self.train_end_index + 1
             self.end = len(self.states) - 1
-        obs = self.states.iloc[self.offset]
+        obs = self.states.iloc[self.current_time]
+
+        self.curr_trade = {'Entry Price': 0, 'Exit Price': 0, 'Entry Time': None, 'Exit Time': None, 'Profit': 0, 'Trade Duration': 0, 'Type': None, 'reward': 0}
+        self.journal = []
+        self.open_trade = False
+
         return obs.values
 
+    def _reset_trade(self):
+        self.curr_trade = {'Entry Price': 0, 'Exit Price': 0, 'Entry Time': None, 'Exit Time': None, 'Profit': 0, 'Trade Duration': 0, 'Type': None, 'reward': 0}
+
+    def _close_trade(self, curr_close_price, curr_time):
+
+        if self.curr_trade['Type'] == 'SELL':
+            self.count_open_trades -= 1
+            # Update remaining keys in curr_trade dict
+            self.curr_trade['Exit Price'] = curr_close_price
+            self.curr_trade['Exit Time'] = curr_time
+            self.curr_trade['Profit'] = -1 * (
+                curr_close_price - self.curr_trade['Entry Price']) * self.lots - self.commission
+
+            # Add the current trade to the journal
+            self.journal.append(self.curr_trade)
+            self._reset_trade()
+            self.open_trade = False
+
+        if self.curr_trade['Type'] == 'BUY':
+            self.count_open_trades -= 1
+            # Action is 1, Selling to close the Long position
+
+            # Update remaining  keys in curr_trade dict
+            self.curr_trade['Exit Price'] = curr_close_price
+            self.curr_trade['Exit Time'] = curr_time
+            self.curr_trade['Profit'] = (curr_close_price - self.curr_trade[
+                'Entry Price']) * self.lots - self.commission
+
+            # Add curr_trade to journal, then reset curr_trade
+            self.journal.append(self.curr_trade)
+            self._reset_trade()
+
+            self.open_trade = False
+
+    def _holding_trade(self, curr_close_price, prev_close_price, reward):
+        self.curr_trade['Trade Duration'] += 1
+
+        if self.curr_trade['Type'] == 'SELL':
+            reward = -1 * (curr_close_price - prev_close_price) * self.lots
+        if self.curr_trade['Type'] == 'BUY':
+            reward = (curr_close_price - prev_close_price) * self.lots
+
+        return reward
+
     def step(self, action):
-        prev_close_price = self.prices.close[self.offset]
-        self.offset += 1
-        curr_open_price = self.prices.open[self.offset]
-        curr_close_price = self.prices.close[self.offset]
-        curr_timestamp = self.prices.index[self.offset]
+        curr_open_price = self.prices.open[self.current_time]
+        curr_close_price = self.prices.close[self.current_time]
+        curr_time = self.prices.index[self.current_time]
+        prev_close_price = self.prices.close[self.current_time - 1]
         reward = 0
 
-        if self.have_position:
-            self.portfolio['Trade Duration'] += 1
-            if self.portfolio['Trade Duration'] >= self.trade_period:
-                self.portfolio['Exit Time'] = curr_timestamp
-                self.portfolio['Exit Price'] = curr_open_price
-                self.journal.append(self.portfolio)
-                self.portfolio = self.init_portfolio.copy()
-                self.have_position = False
-                self.curr_trade_reward = 0
+        if action == 3 or self.curr_trade['Trade Duration'] >= self.trade_period:
+            # Closing trade or trade duration is reached
+            self._close_trade(curr_close_price, curr_time)
+
+        elif action == 1:
+            if not self.open_trade:
+                # BUYING
+                self.curr_trade['Entry Price'] = curr_open_price
+                self.curr_trade['Type'] = "BUY"
+                self.curr_trade['Entry Time'] = curr_time
+                self.curr_trade['Trade Duration'] += 1
+                reward = (curr_close_price - curr_open_price) * self.lots - self.commission
+                self.total_trades += 1
+                self.open_trade = True
+                self.count_open_trades += 1
             else:
-                action = 2  # do nothing
-                multiplier = 1.0 if self.portfolio['Type'] == 'LONG' else -1.0
-                reward = (curr_close_price - prev_close_price) * self.lots * multiplier
+                reward = self._holding_trade(curr_close_price, prev_close_price, reward)
 
-        if action == 2 and not self.have_position:  # do nothing
-            reward = 0
+        elif action == 2:
+            if not self.open_trade:
+                # SELLING
+                self.curr_trade['Entry Price'] = curr_open_price
+                self.curr_trade['Type'] = "SELL"
+                self.curr_trade['Entry Time'] = curr_time
+                self.curr_trade['Trade Duration'] += 1
+                reward = -1 * (curr_close_price - curr_open_price) * self.lots - self.commission
+                self.total_trades += 1
+                self.open_trade = True
+                self.count_open_trades += 1
+            else:
+                reward = self._holding_trade(curr_close_price, prev_close_price, reward)
 
-        else:
-            self.total_trade += 1
-            self.portfolio['Type'] = 'LONG' if action == 0 else 'SHORT'
-            self.portfolio['Entry Time'] = curr_timestamp
-            self.portfolio['Entry Price'] = curr_open_price
-            multiplier = 1.0 if self.portfolio['Type'] == 'LONG' else -1.0
-            reward = (curr_close_price - curr_open_price) * self.lots * multiplier
+        elif action == 0:
+            # Holding trade
+            if self.open_trade:
+                reward = self._holding_trade(curr_close_price, prev_close_price, reward)
+            else:
+                pass
 
-            self.have_position = True
-
-        self.curr_trade_reward += reward
-        self.portfolio['Profit'] += reward
+        self.curr_trade["reward"] += reward
         self.total_reward += reward
 
-        if self.total_trade > 0:
-            self.average_profit_per_trade = self.total_reward / self.total_trade
+        if self.total_trades > 0:
+            self.average_profit_per_trade = self.total_reward / self.total_trades
 
-        info = {'Aberage reward per trade': self.average_profit_per_trade,
-                'Reward for this trade': self.curr_trade_reward,
+        self.current_time += 1
+
+        info = {'Average reward per trade': self.average_profit_per_trade,
+                'Reward for this trade': self.curr_trade["reward"],
                 'Total reward': self.total_reward}
 
-        next_obs = self.states.iloc[self.offset].values
+        next_obs = self.states.iloc[self.current_time].values
 
-        done = self.offset >= self.end
+        done = self.current_time >= self.end
 
-        return next_obs, reward, done, info
+        return next_obs, self.curr_trade["reward"], done, info
 
 
 class StockEnv(gym.Env):
@@ -152,7 +202,7 @@ class StockEnv(gym.Env):
 
     def __init__(self, csv_file, train_test_split, trade_period, lots, commission):
         self.sim = Simulator(Data(csv_file), train_test_split, trade_period, lots, commission)
-        self.action_space = spaces.Discrete(3)
+        self.action_space = spaces.Discrete(4)
         self.observation_space = spaces.Box(self.sim.min_values, self.sim.max_values, dtype=np.float32)
 
     def reset(self, train=True):
@@ -169,26 +219,25 @@ class StockEnv(gym.Env):
     def render(self, journal, train=True):
         # https://github.com/matplotlib/mpl_finance/blob/master/examples/finance_demo.py
 
-        longs = [j for j in journal if j['Type'] == 'LONG']
-        shorts = [j for j in journal if j['Type'] == 'SHORT']
+        journal = pd.DataFrame(journal)
 
         quotes = self.sim.prices
         if train:
-            start = 0
-            end = self.sim.train_end_index - 1
-        else:
-            start = self.train_end_index
-            end = len(quotes) - 1
+            start = quotes.index[0]
+            end = quotes.index[self.sim.train_end_index - 1]
+        elif not train:
+            start = quotes.index[self.train_end_index]
+            end = quotes.index[len(quotes) - 1]
         quotes = quotes[(quotes.index >= start) & (quotes.index <= end)]
 
-        fig, ax = plt.subplots(figsize=(40, 10))
+        fig, ax, ax2 = plt.subplots(figsize=(40, 20))
         fig.subplots_adjust(bottom=0.2)
         ax.xaxis.set_major_locator(mdates.MonthLocator())
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%Y'))
 
         candlestick_ohlc(ax, zip(mdates.date2num(quotes.index.to_pydatetime()), quotes.open, quotes.high, quotes.low, quotes.close), width=0.02, colorup='red', colordown='green')
-        ax.plot(longs['Entry Time'], longs['Entry Price'] - 1, 'r^', alpha=1.0)
-        ax.plot(shorts['Entry Time'], shorts['Entry Price'] - 1, 'gv', alpha=1.0)
+        # ax.plot(longs['Entry Time'], longs['Entry Price'] - 1, 'r^', alpha=1.0)
+        ax.plot(mdates.date2num([short['Entry Time'] for short in shorts]), [short['Entry Price'] + 1 for short in shorts], 'gv', alpha=1.0)
         ax.xaxis_date()
         ax.autoscale_view()
         plt.setp(plt.gca().get_xticklabels(), rotation=45, horizontalalignment='right')
@@ -199,3 +248,93 @@ if __name__ == '__main__':
     pd.set_option('display.max_columns', 500)
     env = StockEnv('../data/000001_0518.csv', 0.8, 1000, 10000, 2.5)
     print(env.sim.states.max(0))
+
+
+# class Simulator:
+#     def __init__(self, data, train_test_split=0.8, trade_period=9, lots=10000, commission=5):
+#         self.states = data.factors
+#         self.prices = data.prices
+#         self.train_end_index = int(train_test_split * len(self.states))
+#         self.trade_period = trade_period
+#         self.min_values = self.states.min(axis=0)
+#         self.max_values = self.states.max(axis=0)
+#         self.lots = lots
+#         self.commission = commission
+#         self.init_portfolio = {
+#             'Entry Price': 0,
+#             'Exit Price': 0,
+#             'Entry Time': None,
+#             'Exit Time': None,
+#             'Profit': 0,
+#             'Trade Duration': 0,
+#             'Type': None
+#         }
+
+#     def reset(self, train):
+#         self.curr_trade_reward = 0
+#         self.total_reward = 0
+#         self.total_trade = 0
+#         self.average_profit_per_trade = 0
+#         self.have_position = False
+#         self.journal = []
+#         self.portfolio = self.init_portfolio.copy()
+#         if train:
+#             self.offset = 0
+#             self.end = self.train_end_index - 1
+#         else:
+#             self.offset = self.train_end_index
+#             self.end = len(self.states) - 1
+#         obs = self.states.iloc[self.offset]
+#         return obs.values
+
+#     def step(self, action):
+#         prev_close_price = self.prices.close[self.offset]
+#         self.offset += 1
+#         curr_open_price = self.prices.open[self.offset]
+#         curr_close_price = self.prices.close[self.offset]
+#         curr_timestamp = self.prices.index[self.offset]
+#         reward = 0
+
+#         if self.have_position:
+#             self.portfolio['Trade Duration'] += 1
+#             if self.portfolio['Trade Duration'] >= self.trade_period:
+#                 self.portfolio['Exit Time'] = curr_timestamp
+#                 self.portfolio['Exit Price'] = curr_open_price
+#                 self.journal.append(self.portfolio)
+#                 self.portfolio = self.init_portfolio.copy()
+#                 self.have_position = False
+#                 self.curr_trade_reward = 0
+#             else:
+#                 action = 2  # do nothing
+#                 multiplier = 1.0 if self.portfolio['Type'] == 'LONG' else -1.0
+#                 reward = (curr_close_price - prev_close_price) * self.lots * multiplier
+
+#         if action == 2 and not self.have_position:  # do nothing
+#             reward = 0
+
+#         else:
+#             self.total_trade += 1
+#             self.portfolio['Type'] = 'LONG' if action == 0 else 'SHORT'
+#             self.portfolio['Entry Time'] = curr_timestamp
+#             self.portfolio['Entry Price'] = curr_open_price
+#             multiplier = 1.0 if self.portfolio['Type'] == 'LONG' else -1.0
+#             reward = (curr_close_price - curr_open_price) * self.lots * multiplier
+
+#             self.have_position = True
+
+#         self.curr_trade_reward += reward
+#         self.portfolio['Profit'] += reward
+#         self.total_reward += reward
+
+#         if self.total_trade > 0:
+#             self.average_profit_per_trade = self.total_reward / self.total_trade
+
+#         info = {'Aberage reward per trade': self.average_profit_per_trade,
+#                 'Reward for this trade': self.curr_trade_reward,
+#                 'Total reward': self.total_reward}
+
+#         next_obs = self.states.iloc[self.offset].values
+
+#         done = self.offset >= self.end
+
+#         return next_obs, reward, done, info

@@ -10,7 +10,7 @@ from stable_baselines import DQN
 
 class TradingDQN(DQN):
 
-    def __init__(self, policy, env, gamma=0.9, batch_size=32, buffer_size=100000, learning_starts=10000, learning_rate=0.0001, target_network_update_freq=1000, exploration_final_eps=0.1, exploration_fraction=0.4, tensorboard_log=None, _init_setup_model=True):
+    def __init__(self, policy, env, gamma=0.9, batch_size=32, buffer_size=100000, learning_starts=10000, learning_rate=0.0001, target_network_update_freq=1000, exploration_final_eps=0.1, exploration_fraction=0.2, tensorboard_log=None, _init_setup_model=True):
 
         super().__init__(policy=policy, env=env, gamma=gamma, batch_size=batch_size, buffer_size=buffer_size, learning_starts=learning_starts, learning_rate=learning_rate, target_network_update_freq=target_network_update_freq, exploration_final_eps=exploration_final_eps, exploration_fraction=exploration_fraction, tensorboard_log=tensorboard_log, _init_setup_model=_init_setup_model)
 
@@ -49,6 +49,9 @@ class TradingDQN(DQN):
             episode_rewards = [0.0]
             obs = self.env.reset(train=True)
 
+            best_train_score = None
+            best_test_score = None
+
             for _ in range(total_timesteps):
                 update_eps = self.exploration.value(self.num_timesteps)
                 with self.sess.as_default():
@@ -73,32 +76,50 @@ class TradingDQN(DQN):
                 if self.num_timesteps > self.learning_starts and self.num_timesteps % self.target_network_update_freq == 0:
                     self.update_target(sess=self.sess)
 
-                mean_100ep_reward = -np.inf if len(episode_rewards[-11:-1]) == 0 else round(float(np.mean(episode_rewards[-11:-1])), 1)
-                num_episodes = len(episode_rewards)
-
                 if done:
+
                     print("-------------------------------------")
                     print("steps                     | {}".format(self.num_timesteps))
-                    print("episodes                  | {}".format(num_episodes))
-                    print("% time spent exploring    | {}".format(int(100 * self.exploration.value(self.num_timesteps))))
-
+                    print("episodes                  | {}".format(len(episode_rewards)))
+                    epsilon = int(100 * self.exploration.value(self.num_timesteps))
+                    print("% time spent exploring    | {}".format(epsilon))
                     print("--")
 
+                    mean_100ep_reward = -np.inf if len(episode_rewards[-11:-1]) == 0 else round(float(np.mean(episode_rewards[-11:-1])), 1)
                     print("mean 10 episode reward    | {:.1f}".format(mean_100ep_reward))
+
+                    journal = self.env.sim.journal
                     print("Total operations          | {}".format(len(self.env.sim.journal)))
-                    # print("Avg duration trades       | {:.2f}".format(np.mean([j["Trade Duration"] for j in self.env.sim.journal])))
-                    print("Total profit              | {:.2f}".format(sum([j['Profit'] for j in self.env.sim.journal])))
+                    buys = [x for x in journal if x['Type'] == 'BUY']
+                    sells = [x for x in journal if x['Type'] == 'SELL']
+                    print("Buy/Sell                  | {}/{}".format(len(buys), len(sells)))
+                    print("Avg duration trades       | {:.2f}".format(np.mean([j["Trade Duration"] for j in journal])))
+                    print("Total profit              | {:.2f}".format(sum([j['Profit'] for j in journal])))
                     print("Avg profit per trade      | {:.3f}".format(self.env.sim.average_profit_per_trade))
 
-                    if num_episodes % test_interval == 0:
+                    if epsilon <= self.exploration_final_eps:
+                        if best_train_score is None or episode_rewards > best_train_score:
+                            self.save('saves/best_model_train.pkl')
+                            best_train_score = episode_rewards
+
+                    if self.num_episodes % test_interval == 0:
                         print("--")
-                        profit, ave_profit = self.test()
-                        print("Total profit test         > {:.2f}".format(profit))
-                        print("Avg profit per trade test > {:.3f}".format(ave_profit))
+                        test_episode_rewards, test_ave_profit_per_trade = self.test()
+                        print("Total profit test         > {:.2f}".format(test_episode_rewards))
+                        print("Avg profit per trade test > {:.3f}".format(test_ave_profit_per_trade))
+
+                        if epsilon <= self.exploration_final_eps:
+                            if best_test_score is None or test_episode_rewards > best_test_score:
+                                self.save('saves/best_model_test.pkl')
+                                best_test_score = test_episode_rewards
                     print("-------------------------------------")
 
                     obs = self.env.reset()
                     episode_rewards.append(0.0)
+
+                    if self.num_episodes + (self.num_episodes / len(episode_rewards)) >= total_timesteps:
+                        self.save('saves/final_model.pkl')
+                        break
 
                 self.num_timesteps += 1
         return self
