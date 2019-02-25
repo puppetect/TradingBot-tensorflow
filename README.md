@@ -43,6 +43,7 @@ TradingDQN(
     <img src="images/000001_loss.png" width="600" >
 </div>
 <img src="images/000001_rewards.png" >
+
 ### Train
 
 - 回测结果：上图为开仓点（蓝色开空、红色开多），下图为收益曲线
