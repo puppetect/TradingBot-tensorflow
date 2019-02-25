@@ -41,10 +41,8 @@ TradingDQN(
 - reward随回合逐渐提高，loss缓慢降低，表明机器学习到了一定的规律
 <div align="center">
     <img src="images/000001_loss.png" width="600" >
-
-    <img src="images/000001_rewards.png" >
 </div>
-
+<img src="images/000001_rewards.png" >
 ### Train
 
 - 回测结果：上图为开仓点（蓝色开空、红色开多），下图为收益曲线
