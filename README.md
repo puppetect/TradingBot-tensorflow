@@ -40,7 +40,7 @@ TradingDQN(
 
 - reward随回合逐渐提高，loss缓慢降低，表明机器学习到了一定的规律
 
-<img src="images/000001_loss.png" width="600" align="middle">
+<img align="middle" src="images/000001_loss.png" width="600" >
 
 <img src="images/000001_rewards.png" >
 
