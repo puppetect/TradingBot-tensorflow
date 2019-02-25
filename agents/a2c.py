@@ -1,3 +1,4 @@
+
 import numpy as np
 import tensorflow as tf
 from stable_baselines import deepq
@@ -5,14 +6,14 @@ from stable_baselines.common import tf_util, TensorboardWriter
 from stable_baselines.common.schedules import LinearSchedule
 from stable_baselines.deepq.replay_buffer import ReplayBuffer
 from stable_baselines.a2c.utils import find_trainable_variables
-from stable_baselines import DQN
+from stable_baselines import A2C
 
 
-class TradingDQN(DQN):
+class TradingA2C(A2C):
 
-    def __init__(self, policy, env, gamma=0.9, batch_size=32, buffer_size=100000, learning_starts=10000, learning_rate=0.0001, target_network_update_freq=1000, exploration_final_eps=0.02, exploration_fraction=0.1, tensorboard_log=None, _init_setup_model=True):
+    def __init__(self, policy, env, gamma=0.9, n_steps=5, vf_coef=0.25, ent_coef=0.01, max_grad_norm=0.5, learning_rate=7e-4, alpha=0.99, epsilon=1e-5, lr_schedule='linear', tensorboard_log=None, _init_setup_model=True):
 
-        super().__init__(policy=policy, env=env, gamma=gamma, batch_size=batch_size, buffer_size=buffer_size, learning_starts=learning_starts, learning_rate=learning_rate, target_network_update_freq=target_network_update_freq, exploration_final_eps=exploration_final_eps, exploration_fraction=exploration_fraction, tensorboard_log=tensorboard_log, _init_setup_model=_init_setup_model)
+        super().__init__(policy=policy, env=env, gamma=gamma, n_steps=n_steps, vf_coef=vf_coef, ent_coef=ent_coef, max_grad_norm=max_grad_norm, learning_rate=learning_rate, alpha=alpha, epsilon=epsilon, lr_schedule=lr_schedule, tensorboard_log=tensorboard_log, _init_setup_model=_init_setup_model)
 
     def setup_model(self):
         self.graph = tf.Graph()
@@ -20,15 +21,7 @@ class TradingDQN(DQN):
             self.sess = tf_util.make_session(graph=self.graph)
 
             # https://github.com/hill-a/stable-baselines/blob/master/stable_baselines/deepq/build_graph.py
-            self.act, self.train_step, self.update_target, self.step_model = deepq.build_train(
-                q_func=self.policy,
-                ob_space=self.env.observation_space,
-                ac_space=self.env.action_space,
-                optimizer=tf.train.AdamOptimizer(learning_rate=self.learning_rate),
-                gamma=self.gamma,
-                # grad_norm_clipping=1,
-                sess=self.sess
-            )
+            step_model = self.policy(self.sess, self.observation_space, self.action_space, self.n_envs, 1, n_batch_step, reuse=False)
             self.params = find_trainable_variables('deepq')
 
             tf_util.initialize(self.sess)

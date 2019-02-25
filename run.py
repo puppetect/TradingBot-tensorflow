@@ -8,7 +8,6 @@ def dqn():
     env = gym.make('trading-v0')
     model = TradingDQN(FFPolicy, env, tensorboard_log='saves/log')
     model.learn(total_timesteps=5000000, test_interval=1)
-    model.save('saves/model.pkl')
 
 
 if __name__ == '__main__':

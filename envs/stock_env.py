@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-from mpl_finance import candlestick_ohlc
+from .mpl_finance import candlestick_ohlc
 import gym
 from gym import spaces
 
@@ -25,6 +25,7 @@ class Data:
             for i in range(lookback):
                 shifted = df.iloc[:, :1].shift(i + 1)
                 df = df.join(shifted, rsuffix='_{}'.format(i + 1))
+        df.drop(['rtn'], axis=1, inplace=True)
         df.dropna(inplace=True)
         # df = (df - df.mean()) / df.std()
         df.clip(-10., 10., inplace=True)
@@ -82,31 +83,18 @@ class Simulator:
             self.end = len(self.states) - 1
         obs = self.states.iloc[self.current_time]
 
-        self.curr_trade = {'Entry Price': 0, 'Exit Price': 0, 'Entry Time': None, 'Exit Time': None, 'Profit': 0, 'Trade Duration': 0, 'Type': None, 'reward': 0}
+        self.curr_trade = {'Entry Price': 0, 'Exit Price': 0, 'Entry Time': None, 'Exit Time': None, 'Profit': 0, 'Trade Duration': 0, 'Type': None, 'Reward': 0}
         self.journal = []
         self.open_trade = False
 
         return obs.values
 
     def _reset_trade(self):
-        self.curr_trade = {'Entry Price': 0, 'Exit Price': 0, 'Entry Time': None, 'Exit Time': None, 'Profit': 0, 'Trade Duration': 0, 'Type': None, 'reward': 0}
+        self.curr_trade = {'Entry Price': 0, 'Exit Price': 0, 'Entry Time': None, 'Exit Time': None, 'Profit': 0, 'Trade Duration': 0, 'Type': None, 'Reward': 0}
 
     def _close_trade(self, curr_close_price, curr_time):
 
-        if self.curr_trade['Type'] == 'SELL':
-            self.count_open_trades -= 1
-            # Update remaining keys in curr_trade dict
-            self.curr_trade['Exit Price'] = curr_close_price
-            self.curr_trade['Exit Time'] = curr_time
-            self.curr_trade['Profit'] = -1 * (
-                curr_close_price - self.curr_trade['Entry Price']) * self.lots - self.commission
-
-            # Add the current trade to the journal
-            self.journal.append(self.curr_trade)
-            self._reset_trade()
-            self.open_trade = False
-
-        if self.curr_trade['Type'] == 'BUY':
+        if self.curr_trade['Type'] == 'LONG':
             self.count_open_trades -= 1
             # Action is 1, Selling to close the Long position
 
@@ -122,15 +110,29 @@ class Simulator:
 
             self.open_trade = False
 
+        if self.curr_trade['Type'] == 'SHORT':
+            self.count_open_trades -= 1
+            # Update remaining keys in curr_trade dict
+            self.curr_trade['Exit Price'] = curr_close_price
+            self.curr_trade['Exit Time'] = curr_time
+            self.curr_trade['Profit'] = -1 * (
+                curr_close_price - self.curr_trade['Entry Price']) * self.lots - self.commission
+
+            # Add the current trade to the journal
+            self.journal.append(self.curr_trade)
+            self._reset_trade()
+            self.open_trade = False
+
     def _holding_trade(self, curr_close_price, prev_close_price, reward):
         self.curr_trade['Trade Duration'] += 1
 
-        if self.curr_trade['Type'] == 'SELL':
+        if self.curr_trade['Type'] == 'SHORT':
             reward = -1 * (curr_close_price - prev_close_price) * self.lots
-        if self.curr_trade['Type'] == 'BUY':
+        if self.curr_trade['Type'] == 'LONG':
             reward = (curr_close_price - prev_close_price) * self.lots
+        action = 0
 
-        return reward
+        return reward, action
 
     def step(self, action):
         curr_open_price = self.prices.open[self.current_time]
@@ -139,46 +141,45 @@ class Simulator:
         prev_close_price = self.prices.close[self.current_time - 1]
         reward = 0
 
-        if action == 3 or self.curr_trade['Trade Duration'] >= self.trade_period:
-            # Closing trade or trade duration is reached
-            self._close_trade(curr_close_price, curr_time)
+        if self.open_trade:
+            if self.curr_trade['Trade Duration'] >= self.trade_period:
+                # Closing trade or trade duration is reached
+                self._close_trade(curr_close_price, curr_time)
+            else:
+                reward, action = self._holding_trade(curr_close_price, prev_close_price, reward)
+
+        elif not self.open_trade and action == 0:
+            reward = -0.04  # customize punishment
 
         elif action == 1:
             if not self.open_trade:
-                # BUYING
+                # SHORT
                 self.curr_trade['Entry Price'] = curr_open_price
-                self.curr_trade['Type'] = "BUY"
-                self.curr_trade['Entry Time'] = curr_time
-                self.curr_trade['Trade Duration'] += 1
-                reward = (curr_close_price - curr_open_price) * self.lots - self.commission
-                self.total_trades += 1
-                self.open_trade = True
-                self.count_open_trades += 1
-            else:
-                reward = self._holding_trade(curr_close_price, prev_close_price, reward)
-
-        elif action == 2:
-            if not self.open_trade:
-                # SELLING
-                self.curr_trade['Entry Price'] = curr_open_price
-                self.curr_trade['Type'] = "SELL"
+                self.curr_trade['Type'] = 'SHORT'
                 self.curr_trade['Entry Time'] = curr_time
                 self.curr_trade['Trade Duration'] += 1
                 reward = -1 * (curr_close_price - curr_open_price) * self.lots - self.commission
                 self.total_trades += 1
                 self.open_trade = True
                 self.count_open_trades += 1
-            else:
-                reward = self._holding_trade(curr_close_price, prev_close_price, reward)
+            # else:
+            #     reward, action = self._holding_trade(curr_close_price, prev_close_price, reward)
 
-        elif action == 0:
-            # Holding trade
-            if self.open_trade:
-                reward = self._holding_trade(curr_close_price, prev_close_price, reward)
-            else:
-                pass
+        elif action == 2:
+            if not self.open_trade:
+                # LONG
+                self.curr_trade['Entry Price'] = curr_open_price
+                self.curr_trade['Type'] = 'LONG'
+                self.curr_trade['Entry Time'] = curr_time
+                self.curr_trade['Trade Duration'] += 1
+                reward = (curr_close_price - curr_open_price) * self.lots - self.commission
+                self.total_trades += 1
+                self.open_trade = True
+                self.count_open_trades += 1
+            # else:
+            #     reward, action = self._holding_trade(curr_close_price, prev_close_price, reward)
 
-        self.curr_trade["reward"] += reward
+        self.curr_trade['Reward'] += reward
         self.total_reward += reward
 
         if self.total_trades > 0:
@@ -187,14 +188,14 @@ class Simulator:
         self.current_time += 1
 
         info = {'Average reward per trade': self.average_profit_per_trade,
-                'Reward for this trade': self.curr_trade["reward"],
+                'Reward for this trade': self.curr_trade['Reward'],
                 'Total reward': self.total_reward}
 
         next_obs = self.states.iloc[self.current_time].values
 
         done = self.current_time >= self.end
 
-        return next_obs, self.curr_trade["reward"], done, info
+        return next_obs, reward, done, info
 
 
 class StockEnv(gym.Env):
@@ -202,7 +203,7 @@ class StockEnv(gym.Env):
 
     def __init__(self, csv_file, train_test_split, trade_period, lots, commission):
         self.sim = Simulator(Data(csv_file), train_test_split, trade_period, lots, commission)
-        self.action_space = spaces.Discrete(4)
+        self.action_space = spaces.Discrete(3)
         self.observation_space = spaces.Box(self.sim.min_values, self.sim.max_values, dtype=np.float32)
 
     def reset(self, train=True):
@@ -220,36 +221,48 @@ class StockEnv(gym.Env):
         # https://github.com/matplotlib/mpl_finance/blob/master/examples/finance_demo.py
 
         journal = pd.DataFrame(journal)
+        print("SUMMARY STATISTICS")
+        print("Total Trades Taken: ", journal.shape[0])
+        print("Total Reward: ", journal['Profit'].sum())
+        print("Average Reward per Trade: ", journal['Profit'].sum() / journal['Profit'].count())
+        print("Win Ratio: %s %%" % (((journal.loc[journal['Profit'] > 0, 'Profit'].count()) / journal.shape[0]) * 100))
+
+        journal['Equity curve'] = journal['Profit'].cumsum()
 
         quotes = self.sim.prices
+
+        fig, (ax, ax2) = plt.subplots(2, 1, figsize=(40, 20))
+        fig.subplots_adjust(bottom=0.2, hspace=0.4)
         if train:
             start = quotes.index[0]
-            end = quotes.index[self.sim.train_end_index - 1]
-        elif not train:
-            start = quotes.index[self.train_end_index]
+            end = quotes.index[self.sim.train_end_index]
+            ax.xaxis.set_major_locator(mdates.YearLocator())
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+            ax2.xaxis.set_major_locator(mdates.YearLocator())
+            ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+        else:
+            start = quotes.index[self.sim.train_end_index + 1]
             end = quotes.index[len(quotes) - 1]
+            ax.xaxis.set_major_locator(mdates.MonthLocator())
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%y'))
+            ax2.xaxis.set_major_locator(mdates.MonthLocator())
+            ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m/%y'))
+
         quotes = quotes[(quotes.index >= start) & (quotes.index <= end)]
 
-        fig, ax, ax2 = plt.subplots(figsize=(40, 20))
-        fig.subplots_adjust(bottom=0.2)
-
         ax.set_title('Action History')
-        ax.xaxis.set_major_locator(mdates.MonthLocator())
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%y'))
-        ax2.xaxis.set_major_locator(mdates.MonthLocator())
-        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m/%y'))
 
-        candlestick_ohlc(ax, zip(mdates.date2num(quotes.index.to_pydatetime()), quotes.open, quotes.high, quotes.low, quotes.close), width=0.05, colorup='red', colordown='green')
+        candlestick_ohlc(ax, zip(mdates.date2num(quotes.index.to_pydatetime()), quotes.open, quotes.high, quotes.low, quotes.close), width=0.02, colorup='red', colordown='green')
 
-        buys = journal.loc[journal.Type == 'BUY', :]
-        sells = journal.loc[journal.Type == 'SELL', :]
+        longs = journal.loc[journal.Type == 'LONG', :]
+        shorts = journal.loc[journal.Type == 'SHORT', :]
 
-        ax.plot(buys['Entry Time'], buys['Entry Price'] - 1, 'r^', alpha=1.0)
-        ax.plot(sells['Entry Time'], sells['Entry Price'] + 1, 'gv', alpha=1.0)
+        ax.plot(longs['Entry Time'], longs['Entry Price'] - 30, 'r^', markersize=2, alpha=0.8, label='Long')
+        ax.plot(shorts['Entry Time'], shorts['Entry Price'] + 30, 'bv', markersize=2, alpha=0.8, label='Short')
         plt.setp(ax.get_xticklabels(), rotation=45, horizontalalignment='right')
 
         ax2.set_title('Equity Curve')
-        ax2.plot(journal['Exit Time'], journal['Profit'])
+        ax2.plot(journal['Exit Time'], journal['Equity curve'])
         plt.setp(ax2.get_xticklabels(), rotation=45, horizontalalignment='right')
 
         plt.show()
