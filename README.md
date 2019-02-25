@@ -37,30 +37,36 @@ TradingDQN(
 ```
 
 ## 表现
+
 - reward随回合逐渐提高，loss缓慢降低，表明机器学习到了一定的规律
 
 <img src="images/000001_loss.png" width="600" align="center">
+
 <img src="images/000001_rewards.png" >
 
 
 ### Train
+
+- 回测结果：上图为开仓点（蓝色开空、红色开多），下图为收益曲线
 
 ```
 Total Trades Taken:  6969
 Total Reward:  351105.5
 Average Reward per Trade:  50.38
 ```
-- 回测结果：蓝色为开空、红色为开多
+
 <img src="images/000001_history_train.png" >
 
 ### Test
+
+- 回测结果：上图为开仓点（蓝色开空、红色开多），下图为收益曲线
 
 ```
 Total Trades Taken:  1273
 Total Reward:  64043.5
 Average Reward per Trade:  50.30
 ```
-- 回测结果：回测结果：蓝色为开空、红色为开多
+
 <img src="images/000001_history_test.png" >
 
 
