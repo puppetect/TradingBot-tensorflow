@@ -10,7 +10,7 @@
 ## 原理
 1. 数据处理（data.py），只将该股过去九天的收盘价的变化率百分比作为观察值
 2. 决策模型（models.py），经过处理的数据作为观察值state导入深度学习模型得出policy
-3. 环境互动（environ.py），将policy通过Agent（如epsilon-greedy或Probability selection）获得对应的动作action（持有或空仓），并和环境互动后得到下一分钟的观察值next_state、盈亏比例reward、回合完成的指令done、和其他信息info
+3. 环境互动（environ.py），将policy通过Agent（如epsilon-greedy或Probability selection）获得对应的动作action，并和环境互动后得到下一分钟的观察值next_state、盈亏比例reward、回合完成的指令done、和其他信息info
 4. 训练模型（train.py），得到若干(next_state, reward, done, info)后，根据所选的强化学习类型（DQN或Actor-critic）计算loss并回溯优化模型参数，保存最佳参数并通过tensorboard监测模型表现
 
 
@@ -39,10 +39,8 @@ TradingDQN(
 ## 表现
 
 - loss随episode缓慢降低，reward逐渐升高并最后converge，表明机器学习到了一定的规律
-<div align="center">
-    <img src="images/000001_loss.png" width="600" >
-</div>
-<img src="images/000001_rewards.png" >
+<img src="images/000001_loss_reward.png" >
+
 
 - Train：开仓时间（蓝色开空、红色开多）与收益曲线
 
